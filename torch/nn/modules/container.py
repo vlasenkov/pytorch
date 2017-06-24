@@ -3,6 +3,7 @@ import string
 import torch
 import warnings
 from .module import Module
+from torch.nn.modules.rnn import RNNBase, RNNCellBase
 
 
 class Container(Module):
@@ -20,9 +21,7 @@ class Sequential(Module):
     """A sequential container.
     Modules will be added to it in the order they are passed in the constructor.
     Alternatively, an ordered dict of modules can also be passed in.
-
     To make it easier to understand, given is a small example::
-
         # Example of using Sequential
         model = nn.Sequential(
                   nn.Conv2d(1,20,5),
@@ -30,7 +29,6 @@ class Sequential(Module):
                   nn.Conv2d(20,64,5),
                   nn.ReLU()
                 )
-
         # Example of using Sequential with OrderedDict
         model = nn.Sequential(OrderedDict([
                   ('conv1', nn.Conv2d(1,20,5)),
@@ -48,6 +46,10 @@ class Sequential(Module):
         else:
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
+        self.recurrent = []
+        for key, module in self._modules.items():
+            if isinstance(module, RNNBase) or isinstance(module, RNNCellBase):
+                self.recurrent.append(key)
 
     def __getitem__(self, idx):
         if not (-len(self) <= idx < len(self)):
@@ -62,10 +64,24 @@ class Sequential(Module):
     def __len__(self):
         return len(self._modules)
 
-    def forward(self, input):
-        for module in self._modules.values():
-            input = module(input)
-        return input
+    def forward(self, input, state=None):
+        if self.recurrent:
+            for key, module in self._modules.items():
+                try:
+                    i = self.recurrent.index(key)
+                    st = module(input, state[i])
+                    input = st[0]
+                    if len(st) > 1:
+                        state[i] = st[1:]
+                    else:
+                        state[i] = st[0]
+                except ValueError:
+                    input = module(input)
+            return input, state
+        else:
+            for module in self._modules.values():
+                input = module(input)
+            return input
 
 
 class ModuleList(Module):
